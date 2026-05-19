@@ -52,6 +52,11 @@ async function run() {
     const carCollection = db.collection("cars");
     const bookingCollection = db.collection("bookings");
 
+    app.get('/featured', (req, res) => {
+      const result = carCollection.find().limit(6).toArray();
+      res.send(result);
+    });
+
     app.post("/cars", verifyToken, async (req, res) => {
       const carData = req.body;
       const result = await carCollection.insertOne(carData);
