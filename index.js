@@ -52,22 +52,51 @@ async function run() {
     const carCollection = db.collection("cars");
     const bookingCollection = db.collection("bookings");
 
+    // ========== FEATURED CARS ==========
     app.get('/featured', async (req, res) => {
       const result = await carCollection.find().limit(6).toArray();
       res.send(result);
     });
 
+    // ========== ADD CAR ==========
     app.post("/cars", verifyToken, async (req, res) => {
       const carData = req.body;
+      // Initialize booking_count to 0
+      carData.booking_count = carData.booking_count || 0;
       const result = await carCollection.insertOne(carData);
       res.send(result);
     });
 
+    // ========== GET ALL CARS ==========
     app.get("/cars", async (req, res) => {
       const cars = await carCollection.find().toArray();
       res.send(cars);
     });
 
+    // ========== SEARCH & FILTER CARS ==========
+    app.get("/cars/search", async (req, res) => {
+      try {
+        const { search, type } = req.query;
+        let filter = {};
+
+        // Search by car name using $regex (case-insensitive)
+        if (search && search.trim() !== "") {
+          filter.carName = { $regex: search, $options: "i" };
+        }
+
+        // Filter by car type
+        if (type && type.trim() !== "") {
+          filter.carType = type;
+        }
+
+        const cars = await carCollection.find(filter).toArray();
+        res.send(cars);
+      } catch (error) {
+        res.status(500).send({ message: "Error fetching cars", error: error.message });
+      }
+    });
+
+    // ========== GET SINGLE CAR ==========
     app.get("/cars/:id", verifyToken, async (req, res) => {
       const carId = req.params.id;
       const query = {
@@ -77,7 +106,8 @@ async function run() {
       res.send(car);
     });
 
-    app.patch("/cars/:id",verifyToken, async (req, res) => {
+    // ========== UPDATE CAR ==========
+    app.patch("/cars/:id", verifyToken, async (req, res) => {
       const carId = req.params.id;
       const updateData = req.body;
       const filter = { _id: new ObjectId(carId) };
@@ -88,33 +118,51 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/cars/:id",verifyToken, async (req, res) => {
+    // ========== DELETE CAR ==========
+    app.delete("/cars/:id", verifyToken, async (req, res) => {
       const carId = req.params.id;
       const query = { _id: new ObjectId(carId) };
       const result = await carCollection.deleteOne(query);
       res.send(result);
     });
 
+    // ========== CREATE BOOKING & INCREMENT BOOKING COUNT ==========
     app.post("/bookings", verifyToken, async (req, res) => {
       const bookingData = req.body;
-      const result = await bookingCollection.insertOne(bookingData);
-      res.send(result);
+      
+      try {
+        // Insert booking
+        const bookingResult = await bookingCollection.insertOne(bookingData);
+        
+        // Increment car's booking_count using $inc operator
+        const carUpdateResult = await carCollection.updateOne(
+          { _id: new ObjectId(bookingData.carId) },
+          { $inc: { booking_count: 1 } }
+        );
+        
+        res.send({ bookingResult, carUpdateResult });
+      } catch (error) {
+        res.status(500).send({ message: "Error creating booking", error: error.message });
+      }
     });
 
-    app.get("/bookings/:userId",verifyToken, async (req, res) => {
+    // ========== GET USER BOOKINGS ==========
+    app.get("/bookings/:userId", verifyToken, async (req, res) => {
       const userId = req.params.userId;
-      filter = { userId: userId };
+      const filter = { userId: userId };
       const bookings = await bookingCollection.find(filter).toArray();
       res.send(bookings);
     });
 
-    app.delete("/bookings/:id",verifyToken, async (req, res) => {
+    // ========== DELETE BOOKING ==========
+    app.delete("/bookings/:id", verifyToken, async (req, res) => {
       const bookingId = req.params.id;
       const query = { _id: new ObjectId(bookingId) };
       const result = await bookingCollection.deleteOne(query);
       res.send(result);
     });
 
+    // ========== HEALTH CHECK ==========
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",
@@ -126,10 +174,12 @@ async function run() {
 }
 run().catch(console.dir);
 
+// ========== ROOT ENDPOINT ==========
 app.get("/", (req, res) => {
   res.send("server is running successfully");
 });
 
+// ========== START SERVER ==========
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
