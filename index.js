@@ -23,7 +23,6 @@ const client = new MongoClient(uri, {
 });
 
 // Middleware
-
 const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
 
 const verifyToken = async (req, res, next) => {
@@ -38,6 +37,11 @@ const verifyToken = async (req, res, next) => {
   try {
     const { payload } = await jwtVerify(token, JWKS);
     console.log(payload);
+    // 👇 ATTACH USER INFO TO REQUEST
+    req.user = {
+      id: payload.sub || payload.userId,
+      email: payload.email,
+    };
     next();
   } catch (error) {
     return res.status(403).send({ message: "Forbidden access" });
@@ -63,6 +67,10 @@ async function run() {
       const carData = req.body;
       // Initialize booking_count to 0
       carData.booking_count = carData.booking_count || 0;
+      // 👇 ADD USER ID TO CAR DATA
+      carData.userId = req.user.id;
+      carData.addedAt = new Date();
+      
       const result = await carCollection.insertOne(carData);
       res.send(result);
     });
@@ -73,18 +81,26 @@ async function run() {
       res.send(cars);
     });
 
+    // 👇 NEW: GET USER'S ADDED CARS
+    app.get("/cars/my", verifyToken, async (req, res) => {
+      try {
+        const userCars = await carCollection.find({ userId: req.user.id }).toArray();
+        res.send(userCars);
+      } catch (error) {
+        res.status(500).send({ message: "Error fetching user cars", error: error.message });
+      }
+    });
+
     // ========== SEARCH & FILTER CARS ==========
     app.get("/cars/search", async (req, res) => {
       try {
         const { search, type } = req.query;
         let filter = {};
 
-        // Search by car name using $regex (case-insensitive)
         if (search && search.trim() !== "") {
           filter.carName = { $regex: search, $options: "i" };
         }
 
-        // Filter by car type
         if (type && type.trim() !== "") {
           filter.carType = type;
         }
@@ -131,10 +147,8 @@ async function run() {
       const bookingData = req.body;
       
       try {
-        // Insert booking
         const bookingResult = await bookingCollection.insertOne(bookingData);
         
-        // Increment car's booking_count using $inc operator
         const carUpdateResult = await carCollection.updateOne(
           { _id: new ObjectId(bookingData.carId) },
           { $inc: { booking_count: 1 } }
@@ -168,7 +182,6 @@ async function run() {
       "Pinged your deployment. You successfully connected to MongoDB!",
     );
   } finally {
-    // Ensures that the client will close when you finish/error
     // await client.close();
   }
 }
