@@ -52,8 +52,8 @@ async function run() {
     const carCollection = db.collection("cars");
     const bookingCollection = db.collection("bookings");
 
-    app.get('/featured', (req, res) => {
-      const result = carCollection.find().limit(6).toArray();
+    app.get('/featured', async (req, res) => {
+      const result = await carCollection.find().limit(6).toArray();
       res.send(result);
     });
 
@@ -101,7 +101,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/bookings/:userId", async (req, res) => {
+    app.get("/bookings/:userId",verifyToken, async (req, res) => {
       const userId = req.params.userId;
       filter = { userId: userId };
       const bookings = await bookingCollection.find(filter).toArray();
