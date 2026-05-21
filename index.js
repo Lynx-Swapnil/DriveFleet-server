@@ -1,20 +1,13 @@
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
-const cookieParser = require("cookie-parser");
-const { jwtVerify } = require("jose-cjs");
+const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
 
 dotenv.config();
 
 const app = express();
-
-// Middleware
-app.use(cors({
-  origin: process.env.CLIENT_URL,
-  credentials: true, // Allow cookies
-}));
+app.use(cors());
 app.use(express.json());
-app.use(cookieParser());
 
 const PORT = process.env.PORT;
 
@@ -29,34 +22,36 @@ const client = new MongoClient(uri, {
   },
 });
 
-// JWT Verification Middleware
-const verifyToken = async (req, res, next) => {
-  try {
-    // Get token from cookies
-    const token = req.cookies?.token || req.cookies?.better_auth_session;
-    
-    if (!token) {
-      return res.status(401).send({ message: "Unauthorized access - No token" });
-    }
+// Middleware
+const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
 
-    // Verify using shared secret
-    const secret = new TextEncoder().encode(process.env.BETTER_AUTH_SECRET);
-    const { payload } = await jwtVerify(token, secret);
-    
-    // Attach user info to request
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  const token = authHeader.split(" ")[1];
+  if (!token) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    console.log(payload);
+    // 👇 ATTACH USER INFO TO REQUEST
     req.user = {
       id: payload.sub || payload.userId,
       email: payload.email,
     };
     next();
   } catch (error) {
-    console.error("Token verification error:", error.message);
-    return res.status(403).send({ message: "Forbidden access - Invalid token" });
+    return res.status(403).send({ message: "Forbidden access" });
   }
 };
 
 async function run() {
   try {
+    // await client.connect();
+
     const db = client.db("driveFleet");
     const carCollection = db.collection("cars");
     const bookingCollection = db.collection("bookings");
@@ -70,7 +65,9 @@ async function run() {
     // ========== ADD CAR ==========
     app.post("/cars", verifyToken, async (req, res) => {
       const carData = req.body;
+      // Initialize booking_count to 0
       carData.booking_count = carData.booking_count || 0;
+      // 👇 ADD USER ID TO CAR DATA
       carData.userId = req.user.id;
       carData.addedAt = new Date();
       
@@ -84,7 +81,7 @@ async function run() {
       res.send(cars);
     });
 
-    // ========== GET USER'S ADDED CARS ==========
+    // 👇 NEW: GET USER'S ADDED CARS
     app.get("/cars/my", verifyToken, async (req, res) => {
       try {
         const userCars = await carCollection.find({ userId: req.user.id }).toArray();
@@ -145,7 +142,7 @@ async function run() {
       res.send(result);
     });
 
-    // ========== CREATE BOOKING ==========
+    // ========== CREATE BOOKING & INCREMENT BOOKING COUNT ==========
     app.post("/bookings", verifyToken, async (req, res) => {
       const bookingData = req.body;
       
@@ -179,9 +176,13 @@ async function run() {
       res.send(result);
     });
 
-    console.log("Connected to MongoDB successfully!");
-  } catch (error) {
-    console.error("Database connection error:", error);
+    // ========== HEALTH CHECK ==========
+    // await client.db("admin").command({ ping: 1 });
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!",
+    );
+  } finally {
+    // await client.close();
   }
 }
 run().catch(console.dir);
